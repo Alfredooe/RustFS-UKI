@@ -18,6 +18,7 @@ prometheus-node-exporter
 eudev
 dosfstools
 e2fsprogs
+xfsprogs
 
 # Tools
 tar

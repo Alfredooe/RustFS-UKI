@@ -1,3 +1,2 @@
-# No persistent mounts — this system runs from initramfs.
-# Add persistent mounts here if needed, e.g.:
-# UUID=XXXX-XXXX  /media/data  vfat  noatime,rw  0 0
+# RustFS data disk (label your disk: mkfs.xfs -L ALFPINE_DATA /dev/sdX)
+LABEL=ALFPINE_DATA /data xfs defaults,noatime,nodiratime 0 0

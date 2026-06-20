@@ -43,12 +43,15 @@ do_qemu() {
         -v "$PWD/$IMAGES_DIR":/images \
         alpine:latest sh -c '
             set -e
-            apk add --no-cache qemu-system-x86_64 ovmf mtools
+            apk add --no-cache qemu-system-x86_64 ovmf mtools xfsprogs
             truncate -s 600M /tmp/disk.img
             mkfs.vfat -F 32 /tmp/disk.img
             mmd -i /tmp/disk.img ::EFI
             mmd -i /tmp/disk.img ::EFI/BOOT
             mcopy -i /tmp/disk.img /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
+            # Data disk for RustFS (XFS — recommended by upstream)
+            truncate -s 2G /tmp/data.img
+            mkfs.xfs -q -i size=512 -n ftype=1 -L ALFPINE_DATA /tmp/data.img
             cp /usr/share/OVMF/OVMF_VARS.fd /tmp/OVMF_VARS.fd
             qemu-system-x86_64 \
                 -M pc -m 2G -nographic \
@@ -56,7 +59,8 @@ do_qemu() {
                 -net nic -net user,hostfwd=tcp::2222-:22,hostfwd=tcp::9000-:9000,hostfwd=tcp::9001-:9001,hostfwd=tcp::9100-:9100 \
                 -drive if=pflash,format=raw,file=/usr/share/OVMF/OVMF_CODE.fd,readonly=on \
                 -drive if=pflash,format=raw,file=/tmp/OVMF_VARS.fd \
-                -drive file=/tmp/disk.img,format=raw,if=virtio
+                -drive file=/tmp/disk.img,format=raw,if=virtio \
+                -drive file=/tmp/data.img,format=raw,if=virtio
         '
 }
 
@@ -121,12 +125,30 @@ case "$1" in
         echo "  build            Build a new UKI image"
         echo "  qemu             Run the latest image in QEMU"
         echo "  flash <device>   Write the UKI directly to a USB stick"
+        echo "  setup-data <dev>  Format a disk as ext4 labeled ALFPINE_DATA"
         echo
         if [ -n "$(latest_image)" ]; then
             echo "Latest image: $(latest_image)"
         else
             echo "No images built yet."
         fi
+        ;;
+    setup-data)
+        device="$2"
+        if [ -z "$device" ]; then
+            echo "Usage: $0 setup-data <device>"
+            echo "Example: $0 setup-data /dev/sdb"
+            echo
+            echo "Formats the device as ext4 and labels it ALFPINE_DATA."
+            echo "On boot, alfpine auto-mounts it at /data for RustFS storage."
+            exit 1
+        fi
+        echo "Setting up data disk: $device"
+        echo "WARNING: This will DESTROY all data on $device!"
+        echo "Press Enter to continue or Ctrl-C to abort..."
+        read -r _
+        sudo mkfs.xfs -q -L ALFPINE_DATA "$device"
+        echo "Done. On next alfpine boot, $device will auto-mount at /data."
         ;;
     *)
         echo "Error: Unknown subcommand '$1'"

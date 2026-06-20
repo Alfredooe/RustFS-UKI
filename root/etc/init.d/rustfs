@@ -3,7 +3,7 @@ description="RustFS S3-compatible object storage"
 
 depend() {
     need net
-    after bootmisc
+    after localmount
 }
 
 start() {

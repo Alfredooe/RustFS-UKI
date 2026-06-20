@@ -3,5 +3,5 @@
 ::wait:/sbin/openrc default
 ::shutdown:/sbin/openrc shutdown
 
-tty1::respawn:/sbin/getty 38400 tty1
-ttyS0::respawn:/bin/sh -c 'while [ ! -f /var/log/rustfs.log ]; do sleep 1; done; exec tail -f /var/log/rustfs.log'
+tty1::respawn:/usr/local/bin/rustfs-dashboard
+ttyS0::respawn:/usr/local/bin/rustfs-dashboard

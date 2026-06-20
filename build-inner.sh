@@ -38,6 +38,12 @@ unzip -p /tmp/rustfs.zip > "$ROOTFS_DEST/usr/local/bin/rustfs"
 chmod +x "$ROOTFS_DEST/usr/local/bin/rustfs"
 rm /tmp/rustfs.zip
 
+__ "Compiling dashboard"
+apk add --no-cache go
+cd /mnt/dashboard
+CGO_ENABLED=0 go build -o "$ROOTFS_DEST/usr/local/bin/rustfs-dashboard" -ldflags="-s -w" .
+cd /
+
 __ "Building initramfs"
 
 cd "$ROOTFS_DEST"
