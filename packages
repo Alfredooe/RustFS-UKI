@@ -12,6 +12,8 @@ dhcpcd
 openresolv
 openntpd
 openssh
+docker
+docker-engine
 
 # Filesystems and devices
 eudev

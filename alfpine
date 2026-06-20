@@ -35,68 +35,36 @@ case "$1" in
             echo "No image found. Run './alfpine build' first."
             exit 1
         fi
-        echo "Running image $image in QEMU"
+        echo "Running image $image in QEMU (inside Docker)"
         echo "  Terminate with: Ctrl-A X"
-        echo "  Shutdown with: Ctrl-A C system_powerdown"
+        echo "  Shutdown in guest: poweroff"
         echo
 
-        # Create a temporary disk image with the UKI on an ESP
-        QEMU_DISK="$IMAGES_DIR/.qemu-disk.img"
-        cleanup() { rm -f "$QEMU_DISK"; }
-        trap cleanup EXIT
+        # Everything runs in Docker: ESP creation + QEMU
+        docker run --rm -it --privileged \
+            -v "$PWD/$IMAGES_DIR":/images \
+            alpine:latest sh -c '
+                set -e
+                apk add --no-cache qemu-system-x86_64 ovmf mtools
 
-        # Build a small ESP disk image with the UKI at the correct path
-        docker run --rm -v "$PWD/$IMAGES_DIR":/images alpine:latest sh -c '
-            apk add --no-cache dosfstools mtools &&
-            truncate -s 256M /images/.qemu-disk.img &&
-            mkfs.vfat -F 32 /images/.qemu-disk.img &&
-            mmd -i /images/.qemu-disk.img ::EFI &&
-            mmd -i /images/.qemu-disk.img ::EFI/BOOT &&
-            mcopy -i /images/.qemu-disk.img /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
-        '
-        sudo chown "$USER:$USER" "$QEMU_DISK"
+                # Create ESP disk image with the UKI
+                truncate -s 350M /tmp/disk.img
+                mkfs.vfat -F 32 /tmp/disk.img
+                mmd -i /tmp/disk.img ::EFI
+                mmd -i /tmp/disk.img ::EFI/BOOT
+                mcopy -i /tmp/disk.img /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
 
-        # Find OVMF firmware
-        OVMF_CODE=""
-        OVMF_VARS=""
-        for f in \
-            /usr/share/OVMF/OVMF_CODE.fd \
-            /usr/share/edk2/x64/OVMF_CODE.fd \
-            /usr/share/edk2/x64/OVMF_CODE.4m.fd \
-            /usr/share/edk2-ovmf/OVMF_CODE.fd \
-            /usr/share/qemu/OVMF.fd; do
-            [ -f "$f" ] && { OVMF_CODE="$f"; break; }
-        done
-        if [ -z "$OVMF_CODE" ]; then
-            echo "OVMF firmware not found. Install it (e.g. 'pacman -S edk2-ovmf' or 'apt install ovmf')."
-            exit 1
-        fi
-        # Find matching vars file
-        OVMF_VARS=""
-        for f in \
-            /usr/share/OVMF/OVMF_VARS.fd \
-            /usr/share/edk2/x64/OVMF_VARS.4m.fd \
-            /usr/share/edk2/x64/OVMF_VARS.fd \
-            /usr/share/edk2-ovmf/OVMF_VARS.fd; do
-            [ -f "$f" ] && { OVMF_VARS="$f"; break; }
-        done
-        if [ -n "$OVMF_VARS" ]; then
-            # Copy vars file — QEMU needs write access to it
-            OVMF_VARS_TMP=$(mktemp)
-            cleanup_vars() { rm -f "$OVMF_VARS_TMP"; }
-            trap cleanup_vars EXIT
-            cp "$OVMF_VARS" "$OVMF_VARS_TMP"
-            qemu-system-x86_64 \
-                -M pc -m 2G -nographic \
-                -drive if=pflash,format=raw,file="$OVMF_CODE",readonly=on \
-                -drive if=pflash,format=raw,file="$OVMF_VARS_TMP" \
-                -drive file="$QEMU_DISK",format=raw,if=virtio
-        else
-            qemu-system-x86_64 \
-                -M pc -m 2G -nographic \
-                -drive if=pflash,format=raw,file="$OVMF_CODE",readonly=on \
-                -drive file="$QEMU_DISK",format=raw,if=virtio
-        fi
+                # Copy vars file (QEMU needs write access)
+                cp /usr/share/OVMF/OVMF_VARS.fd /tmp/OVMF_VARS.fd
+
+                # Run QEMU — try KVM, fall back to TCG
+                qemu-system-x86_64 \
+                    -M pc -m 2G -nographic \
+                    -accel kvm -accel tcg \
+                    -drive if=pflash,format=raw,file=/usr/share/OVMF/OVMF_CODE.fd,readonly=on \
+                    -drive if=pflash,format=raw,file=/tmp/OVMF_VARS.fd \
+                    -drive file=/tmp/disk.img,format=raw,if=virtio
+            '
         ;;
     flash)
         image=$(latest_image)

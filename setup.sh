@@ -28,6 +28,7 @@ rc-update add acpid default
 rc-update add local default
 rc-update add openntpd default
 rc-update add sshd default
+rc-update add docker default
 rc-update add udev-postmount default
 
 # --- Generate SSH host key at build time ---
