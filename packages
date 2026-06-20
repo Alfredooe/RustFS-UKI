@@ -1,0 +1,32 @@
+# Base system
+linux-lts
+linux-firmware-none
+alpine-base
+util-linux
+kbd-bkeymaps
+ca-certificates
+tzdata
+
+# Daemons and services
+dhcpcd
+openresolv
+openntpd
+openssh
+
+# Filesystems and devices
+eudev
+dosfstools
+e2fsprogs
+
+# Tools
+tar
+wget
+curl
+rsync
+htop
+tmux
+less
+git
+file
+tree
+pv

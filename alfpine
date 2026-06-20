@@ -1,0 +1,161 @@
+#!/bin/sh
+set -e
+
+IMAGES_DIR="images"
+mkdir -p "$IMAGES_DIR"
+
+latest_image() {
+    ls -1 "$IMAGES_DIR"/alfpine.*.efi 2>/dev/null | xargs -n1 basename | sort | tail -n 1
+}
+
+next_image() {
+    current_date=$(date +%Y%m%d)
+    counter=1
+    while [ -e "$IMAGES_DIR/alfpine.${current_date}$(printf %02d $counter).efi" ]; do
+        counter=$((counter + 1))
+    done
+    echo "alfpine.${current_date}$(printf %02d $counter).efi"
+}
+
+case "$1" in
+    build)
+        image=$(next_image)
+        echo "Building image $image"
+        echo
+
+        # Run build inside an Alpine container.
+        # We need --privileged for mounting things inside the container (ukify uses systemd-efistub).
+        docker run --privileged --rm -it \
+            -v "$PWD":/mnt -w /root \
+            "alpine:latest" /mnt/build-inner.sh "/mnt/$IMAGES_DIR/$image"
+        ;;
+    qemu)
+        image=$(latest_image)
+        if [ -z "$image" ]; then
+            echo "No image found. Run './alfpine build' first."
+            exit 1
+        fi
+        echo "Running image $image in QEMU"
+        echo "  Terminate with: Ctrl-A X"
+        echo "  Shutdown with: Ctrl-A C system_powerdown"
+        echo
+
+        # Create a temporary disk image with the UKI on an ESP
+        QEMU_DISK="$IMAGES_DIR/.qemu-disk.img"
+        cleanup() { rm -f "$QEMU_DISK"; }
+        trap cleanup EXIT
+
+        # Build a small ESP disk image with the UKI at the correct path
+        docker run --rm -v "$PWD/$IMAGES_DIR":/images alpine:latest sh -c '
+            apk add --no-cache dosfstools mtools &&
+            truncate -s 256M /images/.qemu-disk.img &&
+            mkfs.vfat -F 32 /images/.qemu-disk.img &&
+            mmd -i /images/.qemu-disk.img ::EFI &&
+            mmd -i /images/.qemu-disk.img ::EFI/BOOT &&
+            mcopy -i /images/.qemu-disk.img /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
+        '
+        sudo chown "$USER:$USER" "$QEMU_DISK"
+
+        # Find OVMF firmware
+        OVMF_CODE=""
+        OVMF_VARS=""
+        for f in \
+            /usr/share/OVMF/OVMF_CODE.fd \
+            /usr/share/edk2/x64/OVMF_CODE.fd \
+            /usr/share/edk2/x64/OVMF_CODE.4m.fd \
+            /usr/share/edk2-ovmf/OVMF_CODE.fd \
+            /usr/share/qemu/OVMF.fd; do
+            [ -f "$f" ] && { OVMF_CODE="$f"; break; }
+        done
+        if [ -z "$OVMF_CODE" ]; then
+            echo "OVMF firmware not found. Install it (e.g. 'pacman -S edk2-ovmf' or 'apt install ovmf')."
+            exit 1
+        fi
+        # Find matching vars file
+        OVMF_VARS=""
+        for f in \
+            /usr/share/OVMF/OVMF_VARS.fd \
+            /usr/share/edk2/x64/OVMF_VARS.4m.fd \
+            /usr/share/edk2/x64/OVMF_VARS.fd \
+            /usr/share/edk2-ovmf/OVMF_VARS.fd; do
+            [ -f "$f" ] && { OVMF_VARS="$f"; break; }
+        done
+        if [ -n "$OVMF_VARS" ]; then
+            # Copy vars file — QEMU needs write access to it
+            OVMF_VARS_TMP=$(mktemp)
+            cleanup_vars() { rm -f "$OVMF_VARS_TMP"; }
+            trap cleanup_vars EXIT
+            cp "$OVMF_VARS" "$OVMF_VARS_TMP"
+            qemu-system-x86_64 \
+                -M pc -m 2G -nographic \
+                -drive if=pflash,format=raw,file="$OVMF_CODE",readonly=on \
+                -drive if=pflash,format=raw,file="$OVMF_VARS_TMP" \
+                -drive file="$QEMU_DISK",format=raw,if=virtio
+        else
+            qemu-system-x86_64 \
+                -M pc -m 2G -nographic \
+                -drive if=pflash,format=raw,file="$OVMF_CODE",readonly=on \
+                -drive file="$QEMU_DISK",format=raw,if=virtio
+        fi
+        ;;
+    flash)
+        image=$(latest_image)
+        if [ -z "$image" ]; then
+            echo "No image found. Run './alfpine build' first."
+            exit 1
+        fi
+        device="$2"
+        if [ -z "$device" ]; then
+            echo "Usage: $0 flash <device>"
+            echo "Example: $0 flash /dev/sdb"
+            echo
+            echo "This formats the device with a single EFI System Partition"
+            echo "and copies the UKI to EFI/BOOT/BOOTX64.EFI."
+            exit 1
+        fi
+        echo "Flashing image $image to $device"
+        echo "WARNING: This will DESTROY all data on $device!"
+        echo "Press Enter to continue or Ctrl-C to abort..."
+        read -r _
+
+        # Build a disk image with proper ESP + UKI, then dd to device
+        FLASH_IMG=$(mktemp)
+        cleanup() { rm -f "$FLASH_IMG"; }
+        trap cleanup EXIT
+
+        docker run --rm -v "$PWD/$IMAGES_DIR":/images -v "$(dirname "$FLASH_IMG")":/output \
+            alpine:latest sh -c '
+                apk add --no-cache dosfstools mtools &&
+                truncate -s 256M /output/'"$(basename "$FLASH_IMG")"' &&
+                printf "label: gpt\ntype=uefi" | sfdisk /output/'"$(basename "$FLASH_IMG")"' &&
+                mformat -i /output/'"$(basename "$FLASH_IMG")"'@@$((1024*1024)) -F 32 -v ALFPINE &&
+                mmd -i /output/'"$(basename "$FLASH_IMG")"'@@$((1024*1024)) ::EFI &&
+                mmd -i /output/'"$(basename "$FLASH_IMG")"'@@$((1024*1024)) ::EFI/BOOT &&
+                mcopy -i /output/'"$(basename "$FLASH_IMG")"'@@$((1024*1024)) /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
+            '
+
+        sudo dd of="$device" if="$FLASH_IMG" bs=1M status=progress conv=fsync
+        sudo eject "$device" 2>/dev/null || true
+        echo "Done! Boot from $device with UEFI."
+        ;;
+    "")
+        echo "alfpine — Alpine Linux, running entirely from initramfs as a UKI"
+        echo
+        echo "Usage: $0 <subcommand>"
+        echo
+        echo "Subcommands:"
+        echo "  build            Build a new UKI image"
+        echo "  qemu             Run the latest image in QEMU"
+        echo "  flash <device>   Write the UKI directly to a USB stick"
+        echo
+        if [ -n "$(latest_image)" ]; then
+            echo "Latest image: $(latest_image)"
+        else
+            echo "No images built yet."
+        fi
+        ;;
+    *)
+        echo "Error: Unknown subcommand '$1'"
+        exit 1
+        ;;
+esac

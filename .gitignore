@@ -1,0 +1,5 @@
+/images
+/root/etc/ssh/ssh_host_ed25519_key
+/root/etc/ssh/ssh_host_ed25519_key.pub
+/root/root/.ssh/id_*
+/root/root/.ssh/authorized_keys
