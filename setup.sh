@@ -18,6 +18,7 @@ rc-update add syslog boot
 rc-update add klogd boot
 rc-update add networking boot
 rc-update add seedrng boot
+rc-update add alfpine-disks boot
 
 # --- shutdown ---
 rc-update add mount-ro shutdown

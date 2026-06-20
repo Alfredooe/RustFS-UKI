@@ -2,7 +2,7 @@
 description="RustFS S3-compatible object storage"
 
 depend() {
-    need net
+    need net alfpine-disks
     after localmount
 }
 
@@ -12,10 +12,16 @@ start() {
     export RUSTFS_ROOT_PASSWORD="${RUSTFS_ROOT_PASSWORD:-rustfsadmin}"
     export RUSTFS_ADDRESS="${RUSTFS_ADDRESS:-:9000}"
     export RUSTFS_CONSOLE_ADDRESS="${RUSTFS_CONSOLE_ADDRESS:-:9001}"
+
+    VOLUMES=$(cat /run/alfpine-volumes 2>/dev/null)
+    if [ -z "$VOLUMES" ]; then
+        VOLUMES="/data"
+    fi
+
     start-stop-daemon --start --background --make-pidfile \
         --pidfile /run/rustfs.pid \
         --stdout /var/log/rustfs.log --stderr /var/log/rustfs.log \
-        --exec /usr/local/bin/rustfs -- server /data
+        --exec /usr/local/bin/rustfs -- server $VOLUMES
     eend $?
 }
 

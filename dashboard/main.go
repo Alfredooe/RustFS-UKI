@@ -132,11 +132,16 @@ func (m *model) refresh() {
 		m.s3Status = "✗  not responding"
 	}
 
-	// Data usage
-	duOut, _ := exec.Command("du", "-sh", "/data").Output()
-	m.dataUsage = strings.Fields(strings.TrimSpace(string(duOut)))[0]
+	// Data usage (all disk mounts)
+	duOut, _ := exec.Command("sh", "-c", "du -sh /data/disk* 2>/dev/null | awk '{s=$1; for(i=2;i<=NF;i++) printf \"%s%s\",(i>2?\" \":\"\"),$i; print \"=\"s}' | paste -sd ' ' -").Output()
+	m.dataUsage = strings.TrimSpace(string(duOut))
 	if m.dataUsage == "" {
-		m.dataUsage = "empty"
+		// fallback: /data
+		duOut, _ = exec.Command("du", "-sh", "/data").Output()
+		m.dataUsage = strings.Fields(strings.TrimSpace(string(duOut)))[0]
+	}
+	if m.dataUsage == "" {
+		m.dataUsage = "(no disks)"
 	}
 
 	// Log tail (parsed)

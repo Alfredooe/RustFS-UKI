@@ -1,0 +1,47 @@
+#!/sbin/openrc-run
+description="Discover, format, and mount Alfpine data disks"
+
+depend() {
+    before rustfs
+    after localmount
+}
+
+start() {
+    ebegin "Discovering data disks"
+    N=0
+    for dev in /dev/vd[b-z] /dev/sd[b-z] /dev/nvme[0-9]n[0-9]; do
+        [ -b "$dev" ] || continue
+        # Skip the ESP (contains vfat)
+        blkid "$dev" 2>/dev/null | grep -q 'TYPE="vfat"' && continue
+
+        LABEL="ALFPINE_DATA${N}"
+        MP="/data/disk${N}"
+
+        if ! blkid "$dev" 2>/dev/null | grep -q "ALFPINE_DATA"; then
+            ebegin "Formatting $dev as XFS ($LABEL)"
+            mkfs.xfs -q -i size=512 -n ftype=1 -L "$LABEL" "$dev"
+            eend $?
+        fi
+
+        mkdir -p "$MP"
+        mount LABEL="$LABEL" "$MP" 2>/dev/null && N=$((N + 1))
+    done
+    eend 0
+
+    # Write discovered volumes for rustfs
+    VOLUMES=""
+    for mp in /data/disk*; do
+        [ -d "$mp" ] || continue
+        VOLUMES="$VOLUMES $mp"
+    done
+    echo "$VOLUMES" > /run/alfpine-volumes
+}
+
+stop() {
+    ebegin "Unmounting data disks"
+    for mp in /data/disk*; do
+        [ -d "$mp" ] || continue
+        umount "$mp" 2>/dev/null
+    done
+    eend 0
+}

@@ -29,6 +29,10 @@ do_build() {
 
 do_qemu() {
     image="$1"
+    num_disks="$2"
+    if [ -z "$num_disks" ]; then
+        num_disks=1
+    fi
     if [ -z "$image" ]; then
         image=$(latest_image)
         if [ -z "$image" ]; then
@@ -36,7 +40,7 @@ do_qemu() {
             exit 1
         fi
     fi
-    echo "Booting $image in QEMU (Docker)..."
+    echo "Booting $image in QEMU ($num_disks data disk(s))..."
     echo
     docker run --rm -it --privileged \
         -p 2222:2222 -p 9000:9000 -p 9001:9001 -p 9100:9100 \
@@ -49,18 +53,22 @@ do_qemu() {
             mmd -i /tmp/disk.img ::EFI
             mmd -i /tmp/disk.img ::EFI/BOOT
             mcopy -i /tmp/disk.img /images/'"$image"' ::EFI/BOOT/BOOTX64.EFI
-            # Data disk for RustFS (XFS — recommended by upstream)
-            truncate -s 2G /tmp/data.img
-            mkfs.xfs -q -i size=512 -n ftype=1 -L ALFPINE_DATA /tmp/data.img
+            # Data disks
+            DRIVES=""
+            for N in $(seq 0 $(( '$num_disks' - 1 ))); do
+                truncate -s 2G /tmp/data${N}.img
+                mkfs.xfs -q -i size=512 -n ftype=1 -L ALFPINE_DATA${N} /tmp/data${N}.img
+                DRIVES="$DRIVES -drive file=/tmp/data${N}.img,format=raw,if=virtio"
+            done
             cp /usr/share/OVMF/OVMF_VARS.fd /tmp/OVMF_VARS.fd
-            qemu-system-x86_64 \
+            eval qemu-system-x86_64 \
                 -M pc -m 2G -nographic \
                 -accel kvm -accel tcg \
                 -net nic -net user,hostfwd=tcp::2222-:22,hostfwd=tcp::9000-:9000,hostfwd=tcp::9001-:9001,hostfwd=tcp::9100-:9100 \
                 -drive if=pflash,format=raw,file=/usr/share/OVMF/OVMF_CODE.fd,readonly=on \
                 -drive if=pflash,format=raw,file=/tmp/OVMF_VARS.fd \
                 -drive file=/tmp/disk.img,format=raw,if=virtio \
-                -drive file=/tmp/data.img,format=raw,if=virtio
+                $DRIVES
         '
 }
 
@@ -69,12 +77,23 @@ case "$1" in
         do_build >&2
         ;;
     qemu)
-        do_qemu ""
+        disks=1
+        if [ "$2" = "--disks" ] && [ -n "$3" ]; then
+            disks="$3"
+        fi
+        do_qemu "" "$disks"
         ;;
     run)
+        disks=1
+        for arg in "$@"; do
+            case "$arg" in
+                --disks) disks="${2:-1}"; shift ;;
+            esac
+            shift 2>/dev/null
+        done
         image=$(do_build)
         echo
-        do_qemu "$image"
+        do_qemu "$image" "$disks"
         ;;
     flash)
         image=$(latest_image)
@@ -118,14 +137,14 @@ case "$1" in
     "")
         echo "alfpine — Alpine Linux, running entirely from initramfs as a UKI"
         echo
-        echo "Usage: $0 <subcommand>"
+        echo "Usage: $0 <subcommand> [options]"
         echo
         echo "Subcommands:"
-        echo "  run              Build and run in QEMU"
-        echo "  build            Build a new UKI image"
-        echo "  qemu             Run the latest image in QEMU"
-        echo "  flash <device>   Write the UKI directly to a USB stick"
-        echo "  setup-data <dev>  Format a disk as ext4 labeled ALFPINE_DATA"
+        echo "  run [--disks N]   Build and run in QEMU (default 1 data disk)"
+        echo "  build             Build a new UKI image"
+        echo "  qemu [--disks N]  Run the latest image in QEMU"
+        echo "  flash <device>    Write the UKI directly to a USB stick"
+        echo "  setup-data <dev>  Format a disk as XFS labeled ALFPINE_DATA0"
         echo
         if [ -n "$(latest_image)" ]; then
             echo "Latest image: $(latest_image)"
@@ -147,7 +166,7 @@ case "$1" in
         echo "WARNING: This will DESTROY all data on $device!"
         echo "Press Enter to continue or Ctrl-C to abort..."
         read -r _
-        sudo mkfs.xfs -q -L ALFPINE_DATA "$device"
+        sudo mkfs.xfs -i size=512 -n ftype=1 -L ALFPINE_DATA0 "$device"
         echo "Done. On next alfpine boot, $device will auto-mount at /data."
         ;;
     *)

@@ -1,2 +1,0 @@
-# RustFS data disk (label your disk: mkfs.xfs -L ALFPINE_DATA /dev/sdX)
-LABEL=ALFPINE_DATA /data xfs defaults,noatime,nodiratime 0 0
