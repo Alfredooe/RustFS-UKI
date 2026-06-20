@@ -19,11 +19,11 @@ next_image() {
 
 do_build() {
     image=$(next_image)
-    echo "Building image $image"
-    echo
+    echo "Building image $image" >&2
+    echo >&2
     docker run --privileged --rm -it \
         -v "$PWD":/mnt -w /root \
-        "alpine:latest" /mnt/build-inner.sh "/mnt/$IMAGES_DIR/$image"
+        "alpine:latest" /mnt/build-inner.sh "/mnt/$IMAGES_DIR/$image" >&2
     echo "$image"
 }
 
@@ -60,7 +60,7 @@ do_qemu() {
 
 case "$1" in
     build)
-        do_build > /dev/null
+        do_build >&2
         ;;
     qemu)
         do_qemu ""
