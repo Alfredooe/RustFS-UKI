@@ -13,7 +13,9 @@ Everything runs in RAM. Reboot = factory reset.
 ./alfpine flash /dev/sdb # Write to USB stick
 ```
 
-Only dependency is **Docker**. Build and QEMU Testing run inside containers.
+Only dependency is **Docker**. Build and QEMU run inside containers.
+
+The image build installs Docker so it's available in the UKI.
 
 Login: `root` / `root`.
 
